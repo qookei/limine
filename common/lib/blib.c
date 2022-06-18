@@ -211,7 +211,13 @@ retry:
         goto retry;
     }
 
+#if defined(__x86_64__) || defined(__i386__)
     asm volatile ("cli" ::: "memory");
+#elif defined (__aarch64__)
+    asm volatile ("msr daifset, #15" ::: "memory");
+#else
+#error Unknown architecture
+#endif
 
     // Go through new EFI memmap and free up bootloader entries
     size_t entry_count = efi_mmap_size / efi_desc_size;

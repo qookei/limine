@@ -59,6 +59,10 @@ uint64_t strtoui(const char *s, const char **end, int base);
 void memcpy32to64(uint64_t, uint64_t, uint64_t);
 #elif defined (__x86_64__)
 #  define memcpy32to64(X, Y, Z) memcpy((void *)(uintptr_t)(X), (void *)(uintptr_t)(Y), Z)
+#elif defined (__aarch64__)
+#  define memcpy32to64(X, Y, Z) memcpy((void *)(uintptr_t)(X), (void *)(uintptr_t)(Y), Z)
+#else
+#error Unknown architecture
 #endif
 
 #define DIV_ROUNDUP(a, b) (((a) + ((b) - 1)) / (b))
