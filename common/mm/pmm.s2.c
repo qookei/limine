@@ -249,11 +249,11 @@ del_mm1:
 struct e820_entry_t *get_memmap(size_t *entries) {
 #if uefi == 1
 
-#if defined (__x86_64__)
+#if defined (__x86_64__) || defined (__aarch64__)
     pagemap_t pagemap = new_pagemap(4);
 
     for (uint64_t i = 0; i < 0x100000000; i += 0x40000000) {
-        map_page(pagemap, i, i, 0x03, Size1GiB);
+        map_page(pagemap, i, i, VMM_FLAG_WRITE, Size1GiB);
     }
 
     size_t _memmap_entries = memmap_entries;
@@ -280,11 +280,56 @@ struct e820_entry_t *get_memmap(size_t *entries) {
 
         for (uint64_t j = 0; j < aligned_length; j += 0x40000000) {
             uint64_t page = aligned_base + j;
-            map_page(pagemap, page, page, 0x03, Size1GiB);
+            map_page(pagemap, page, page, VMM_FLAG_WRITE, Size1GiB);
         }
     }
 
+#if defined (__x86_64__)
     asm volatile ("mov %0, %%cr3" :: "r"(pagemap.top_level) : "memory");
+#elif defined (__aarch64__)
+    uint64_t aa64mmfr0;
+    int el = current_el();
+
+// These values are based off of the ones in protos/limine.c
+#define MAIR ((uint64_t)0xFF)
+#define TCR_EL1(pa) (((uint64_t)(pa) << 32) | ((uint64_t)0xa5102510))
+#define TCR_EL2(pa) (((uint64_t)(pa) << 16) | ((uint64_t)0x2510))
+
+    asm volatile ("mrs %0, id_aa64mmfr0_el1" : "=r" (aa64mmfr0));
+    uint64_t pa = aa64mmfr0 & 0xF;
+
+    if (el == 1) {
+        asm volatile (
+                "msr mair_el1, %0\n\t"
+                "msr tcr_el1, %1\n\t"
+                "msr ttbr0_el1, %2\n\t"
+                "msr ttbr1_el1, %3\n\t"
+                "isb\n\t"
+                "tlbi vmalle1\n\t"
+                "dsb sy\n\t"
+                "isb" : :
+                    "r"(MAIR),
+                    "r"(TCR_EL1(pa)),
+                    "r"(pagemap.top_level[0]),
+                    "r"(pagemap.top_level[1])
+                    : "memory");
+    } else if (el == 2) {
+        asm volatile (
+                "msr mair_el2, %0\n\t"
+                "msr tcr_el2, %1\n\t"
+                "msr ttbr0_el2, %2\n\t"
+                "isb\n\t"
+                "tlbi alle2\n\t"
+                "dsb sy\n\t"
+                "isb" : :
+                    "r"(MAIR),
+                    "r"(TCR_EL2(pa)),
+                    "r"(pagemap.top_level[0])
+                    : "memory");
+    } else {
+        panic(false, "Unexpected EL in get_memmap");
+    }
+#endif
 #elif defined (__i386__)
     asm volatile (
         "mov %%cr0, %%eax\n\t"
@@ -292,6 +337,8 @@ struct e820_entry_t *get_memmap(size_t *entries) {
         "mov %%eax, %%cr0\n\t"
         ::: "eax", "memory"
     );
+#elif !defined(__aarch64__) // Handled above
+#error Unknown architecture
 #endif
 
     pmm_reclaim_uefi_mem();
