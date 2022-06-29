@@ -211,14 +211,10 @@ else ifeq ($(TARGET), uefi-aarch64)
 all: $(call MKESCAPE,$(BUILDDIR))/BOOTAA64.EFI
 endif
 
-$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.bin: sys/smp_trampoline.real
-	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
-	nasm $< -f bin -o '$(call SHESCAPE,$@)'
-
 $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.o: $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.bin
 	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
 	cd '$(call SHESCAPE,$(BUILDDIR))/sys' && \
-		$(CROSS_OBJCOPY) -B i8086 -I binary -O $(OBJCOPY_ARCH) smp_trampoline.bin '$(call SHESCAPE,$@)'
+		$(CROSS_OBJCOPY) -I binary -O $(OBJCOPY_ARCH) smp_trampoline.bin '$(call SHESCAPE,$@)'
 
 $(call MKESCAPE,$(BUILDDIR))/font.o: font.bin
 	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
@@ -371,7 +367,7 @@ $(call MKESCAPE,$(BUILDDIR))/linker_nomap.ld: linker_uefi_aarch64.ld.in
 	mkdir -p '$(call SHESCAPE,$(BUILDDIR))'
 	$(CROSS_CC) -x c -E -P -undef -DLINKER_NOMAP linker_uefi_aarch64.ld.in -o '$(call SHESCAPE,$(BUILDDIR))/linker_nomap.ld'
 
-$(call MKESCAPE,$(BUILDDIR))/limine_nomap.elf: $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/crt0-efi-aarch64.o $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/reloc_aarch64.o $(OBJ) $(call MKESCAPE,$(BUILDDIR))/tinf/tinfgzip.o $(call MKESCAPE,$(BUILDDIR))/tinf/tinflate.o $(call MKESCAPE,$(BUILDDIR))/font.o # TODO(qookie): $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.o
+$(call MKESCAPE,$(BUILDDIR))/limine_nomap.elf: $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/crt0-efi-aarch64.o $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/reloc_aarch64.o $(OBJ) $(call MKESCAPE,$(BUILDDIR))/tinf/tinfgzip.o $(call MKESCAPE,$(BUILDDIR))/tinf/tinflate.o $(call MKESCAPE,$(BUILDDIR))/font.o $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.o
 	$(MAKE) '$(call SHESCAPE,$(BUILDDIR))/linker_nomap.ld'
 	$(CROSS_LD) \
 		-T'$(call SHESCAPE,$(BUILDDIR))/linker_nomap.ld' \
@@ -381,7 +377,7 @@ $(call MKESCAPE,$(BUILDDIR))/linker.ld: linker_uefi_aarch64.ld.in
 	mkdir -p '$(call SHESCAPE,$(BUILDDIR))'
 	$(CROSS_CC) -x c -E -P -undef linker_uefi_aarch64.ld.in -o '$(call SHESCAPE,$(BUILDDIR))/linker.ld'
 
-$(call MKESCAPE,$(BUILDDIR))/limine.elf: $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/crt0-efi-aarch64.o $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/reloc_aarch64.o $(OBJ) $(call MKESCAPE,$(BUILDDIR))/tinf/tinfgzip.o $(call MKESCAPE,$(BUILDDIR))/tinf/tinflate.o $(call MKESCAPE,$(BUILDDIR))/font.o $(call MKESCAPE,$(BUILDDIR))/full.map.o # TODO(qookie): $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.o
+$(call MKESCAPE,$(BUILDDIR))/limine.elf: $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/crt0-efi-aarch64.o $(call MKESCAPE,$(BUILDDIR))/limine-efi/gnuefi/reloc_aarch64.o $(OBJ) $(call MKESCAPE,$(BUILDDIR))/tinf/tinfgzip.o $(call MKESCAPE,$(BUILDDIR))/tinf/tinflate.o $(call MKESCAPE,$(BUILDDIR))/font.o $(call MKESCAPE,$(BUILDDIR))/full.map.o $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.o
 	$(MAKE) '$(call SHESCAPE,$(BUILDDIR))/linker.ld'
 	$(CROSS_LD) \
 		-T'$(call SHESCAPE,$(BUILDDIR))/linker.ld' \
@@ -466,6 +462,10 @@ endif
 -include $(HEADER_DEPS)
 
 ifeq ($(TARGET), bios)
+$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.bin: sys/smp_trampoline.real
+	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
+	nasm $< -f bin -o '$(call SHESCAPE,$@)'
+
 $(call MKESCAPE,$(BUILDDIR))/%.o: %.asm_ia32
 	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
 	nasm '$(call SHESCAPE,$<)' -F dwarf -g $(WERROR) -f elf32 -o '$(call SHESCAPE,$@)'
@@ -480,6 +480,10 @@ $(call MKESCAPE,$(BUILDDIR))/%.o: %.asm_x86
 endif
 
 ifeq ($(TARGET), uefi-x86-64)
+$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.bin: sys/smp_trampoline.real
+	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
+	nasm $< -f bin -o '$(call SHESCAPE,$@)'
+
 $(call MKESCAPE,$(BUILDDIR))/%.o: %.asm_x86_64
 	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
 	nasm '$(call SHESCAPE,$<)' -F dwarf -g $(WERROR) -f elf64 -o '$(call SHESCAPE,$@)'
@@ -494,12 +498,28 @@ $(call MKESCAPE,$(BUILDDIR))/%.o: %.asm_x86
 endif
 
 ifeq ($(TARGET), uefi-aarch64)
+$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.intermediate_o: sys/smp_trampoline.aarch64_bare_asm
+	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
+	$(CROSS_CC) -x assembler-with-cpp -c '$(call SHESCAPE,$<)' -g $(WERROR) -o '$(call SHESCAPE,$@)'
+
+$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.elf: $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.intermediate_o
+	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
+	$(CROSS_LD) '$(call SHESCAPE,$<)' $(CROSS_LDFLAGS) $(INTERNAL_LDFLAGS) -Ttext 0 -o '$(call SHESCAPE,$@)'
+
+$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.bin: $(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.elf
+	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
+	$(CROSS_OBJCOPY) -O $(OBJCOPY_ARCH) '$(call SHESCAPE,$<)' --dump-section .text='$(call SHESCAPE,$@)'
+
 $(call MKESCAPE,$(BUILDDIR))/%.o: %.asm_aarch64
 	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
-	$(CROSS_CC) -x assembler -c '$(call SHESCAPE,$<)' -g $(WERROR) -o '$(call SHESCAPE,$@)'
+	$(CROSS_CC) -x assembler-with-cpp -c '$(call SHESCAPE,$<)' -g $(WERROR) -o '$(call SHESCAPE,$@)'
 endif
 
 ifeq ($(TARGET), uefi-ia32)
+$(call MKESCAPE,$(BUILDDIR))/sys/smp_trampoline.bin: sys/smp_trampoline.real
+	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
+	nasm $< -f bin -o '$(call SHESCAPE,$@)'
+
 $(call MKESCAPE,$(BUILDDIR))/%.o: %.asm_ia32
 	mkdir -p "$$(dirname '$(call SHESCAPE,$@)')"
 	nasm '$(call SHESCAPE,$<)' -F dwarf -g $(WERROR) -f elf32 -o '$(call SHESCAPE,$@)'
