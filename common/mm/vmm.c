@@ -143,18 +143,85 @@ void vmm_assert_4k_pages(void) {
 #define PT_FLAG_ACCESS   ((uint64_t)1 << 10)
 #define PT_FLAG_XN       ((uint64_t)1 << 54)
 #define PT_FLAG_WB       ((uint64_t)0 << 2)
+#define PT_PADDR_MASK    ((uint64_t)0x0000FFFFFFFFF000)
 
-static pt_entry_t *get_next_level(pt_entry_t *current_level, size_t entry) {
+uint64_t pt_to_vmm_flags(pt_entry_t entry) {
+    uint64_t flags = 0;
+
+    if (!(entry & PT_FLAG_READONLY))
+        flags |= VMM_FLAG_WRITE;
+    if (entry & PT_FLAG_XN)
+        flags |= VMM_FLAG_NOEXEC;
+
+    return flags;
+}
+
+static pt_entry_t *get_next_level(pagemap_t pagemap, pt_entry_t *current_level, uint64_t virt, enum page_size desired_sz, size_t level_idx, size_t entry) {
     pt_entry_t *ret;
 
-    if (current_level[entry] & PT_FLAG_VALID) {
-        // Present flag set
+    if ((current_level[entry] & PT_FLAG_VALID) && (current_level[entry] & PT_FLAG_TABLE)) {
+        // Present and table flags set
         ret = (pt_entry_t *)(size_t)(current_level[entry] & ~((pt_entry_t)0xfff));
     } else {
-        // Allocate a table for the next level
-        ret = ext_mem_alloc(PT_SIZE);
-        current_level[entry] = (pt_entry_t)(size_t)ret | PT_FLAG_VALID
-                | PT_FLAG_TABLE;
+        if ((current_level[entry] & PT_FLAG_VALID) && !(current_level[entry] & PT_FLAG_TABLE)) {
+            // We are replacing an existing large page with a smaller page.
+            // Split the previous mapping into mappings of the newly requested size
+            // before performing the requested map operation.
+
+            uint64_t old_page_size, new_page_size;
+            switch (level_idx) {
+                case 2:
+                    old_page_size = 0x40000000;
+                    break;
+
+                case 1:
+                    old_page_size = 0x200000;
+                    break;
+
+                default:
+                    panic(false, "Unexpected page table state in get_next_level");
+            }
+
+            switch (desired_sz) {
+                case Size1GiB:
+                    new_page_size = 0x40000000;
+                    break;
+
+                case Size2MiB:
+                    new_page_size = 0x200000;
+                    break;
+
+                case Size4KiB:
+                    new_page_size = 0x1000;
+                    break;
+
+                default:
+                    panic(false, "Unexpected page size in get_next_level");
+            }
+
+            // Save all the information from the old entry at this level
+            uint64_t old_flags = pt_to_vmm_flags(current_level[entry]);
+            uint64_t old_phys = current_level[entry] & PT_PADDR_MASK;
+            uint64_t old_virt = virt & ~(old_page_size - 1);
+
+            if (old_phys & (old_page_size - 1))
+                panic(false, "Unexpected page table entry address in get_next_level");
+
+            // Allocate a table for the next level
+            ret = ext_mem_alloc(PT_SIZE);
+            current_level[entry] = (pt_entry_t)(size_t)ret | PT_FLAG_VALID
+                    | PT_FLAG_TABLE;
+
+            // Recreate the old mapping with smaller pages
+            for (uint64_t i = 0; i < old_page_size; i += new_page_size) {
+                map_page(pagemap, old_virt + i, old_phys + i, old_flags, desired_sz);
+            }
+        } else {
+            // Allocate a table for the next level
+            ret = ext_mem_alloc(PT_SIZE);
+            current_level[entry] = (pt_entry_t)(size_t)ret | PT_FLAG_VALID
+                    | PT_FLAG_TABLE;
+        }
     }
 
     return ret;
@@ -199,23 +266,23 @@ void map_page(pagemap_t pagemap, uint64_t virt_addr, uint64_t phys_addr, uint64_
     }
 
 level5:
-    pml4 = get_next_level(pml5, pml5_entry);
+    pml4 = get_next_level(pagemap, pml5, virt_addr, pg_size, 4, pml5_entry);
 level4:
-    pml3 = get_next_level(pml4, pml4_entry);
+    pml3 = get_next_level(pagemap, pml4, virt_addr, pg_size, 3, pml4_entry);
 
     if (pg_size == Size1GiB) {
         pml3[pml3_entry] = (pt_entry_t)(phys_addr | real_flags | PT_FLAG_BLOCK);
         return;
     }
 
-    pml2 = get_next_level(pml3, pml3_entry);
+    pml2 = get_next_level(pagemap, pml3, virt_addr, pg_size, 2, pml3_entry);
 
     if (pg_size == Size2MiB) {
         pml2[pml2_entry] = (pt_entry_t)(phys_addr | real_flags | PT_FLAG_BLOCK);
         return;
     }
 
-    pml1 = get_next_level(pml2, pml2_entry);
+    pml1 = get_next_level(pagemap, pml2, virt_addr, pg_size, 1, pml2_entry);
 
     pml1[pml1_entry] = (pt_entry_t)(phys_addr | real_flags | PT_FLAG_4K_PAGE);
 }
